@@ -1,6 +1,7 @@
 import pathlib
 import typing
 
+
 def get_advent_of_code_path(year: int, day: int) -> pathlib.Path:
 	"""
 	Get the fully-qualified Path to the desired input file
@@ -30,9 +31,12 @@ def get_advent_of_code_path(year: int, day: int) -> pathlib.Path:
 	path = pathlib.Path(__file__).parent / str(year) / "inputs" / f"Day{day}Challenge.txt"
 
 	if not path.exists():
-		raise ValueError(f"AdventOfCode challenge for Day {day} of {year} has not yet been attempted [{path}]")
+		raise ValueError(
+			f"AdventOfCode challenge for Day {day} of {year} has not yet been attempted [{path}]"
+		)
 
 	return path
+
 
 def get_advent_of_code_input(year: int, day: int) -> typing.Iterable[str]:
 	"""

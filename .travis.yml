@@ -9,6 +9,8 @@ install:
   - pip install -r requirements.txt
 # command to run tests
 script:
+  - echo "tests"
   - python -m pytest
-  - mypy shared 
-  - mypy AdventOfCode
+  - echo "linting"
+  - mypy .
+  - pycodestyle

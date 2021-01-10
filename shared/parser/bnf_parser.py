@@ -3,7 +3,10 @@ import enum
 import re
 import typing
 
-class BnfSyntaxViolation(Exception): pass
+
+class BnfSyntaxViolation(Exception):
+	pass
+
 
 @enum.unique
 class BnfTokenType(enum.Enum):
@@ -12,6 +15,7 @@ class BnfTokenType(enum.Enum):
 	SEPARATOR = enum.auto()
 	COMMENT = enum.auto()
 	BUILTIN = enum.auto()
+
 
 @enum.unique
 class BnfBulitinTokens(enum.Enum):
@@ -24,6 +28,7 @@ class BnfBulitinTokens(enum.Enum):
 	WHITESPACE = "whitespace"
 	SYMBOL = "symbol"
 
+
 @enum.unique
 class BnfSpecialChar(enum.Enum):
 	OPEN_BRACKET = '<'
@@ -35,14 +40,17 @@ class BnfSpecialChar(enum.Enum):
 	COMMENT = ';'
 	ASSIGNMENT = "::="
 
-class BnfToken(collections.namedtuple("BnfToken", "token_type token_value")): pass
+
+class BnfToken(collections.namedtuple("BnfToken", "token_type token_value")):
+	pass
+
 
 class _BootstrapBnfParserGenerator:
 	def __init__(self, name: str, specification: typing.Union[str, typing.Iterable[str]]):
 		self.name = name
-		if hasattr(specification, "splitlines"): # str
-			specification = specification.splitlines()
-		self.spec = specification
+		if hasattr(specification, "splitlines"):
+			specification = typing.cast(str, specification).splitlines()
+		self.spec = list(specification)
 
 	def lex(self):
 		tokens = []
@@ -56,22 +64,47 @@ class _BootstrapBnfParserGenerator:
 				self._error(line, "no rule", line)
 		return tokens
 
-
-	def _lex_comment(self, line: str, tokens: typing.Iterable[str]):
+	def _lex_comment(self, line: str, tokens: typing.List[str]):
 		# do nothing
 		pass
 
-	def _lex_rule_assignment(self, line: str, linenum: int, tokens: typing.Iterable[str]):
+	def _lex_rule_assignment(self, line: str, linenum: int, tokens: typing.List[str]):
 		rule_name = self._lex_rule_name(line, linenum)
-		rem_line = line[len(rule_name)+2:].strip() # jump ahead to the rule assignment
+		rem_line = line[len(rule_name) + 2:].strip()  # jump ahead to the rule assignment
 		if not rem_line.startswith(BnfSpecialChar.ASSIGNMENT.value):
 			self._error(linenum, "no rule assignment", rem_line)
-		rem_line = rem_line[len(BnfSpecialChar.ASSIGNMENT.value):].strip() # get the actual assignment
+		rem_line = rem_line[len(BnfSpecialChar.ASSIGNMENT.value):].strip()  # get the actual assignment
 
 		self._lex_assignment_options(rem_line, linenum, tokens)
 
-	def _lex_assignment_options(self, line: str, tokens: typing.Iterable[str]):
+	def _lex_assignment_options(self, line: str, linenum: int, tokens: typing.List[str]):
+		in_literal = False
+		quote_type = (BnfSpecialChar.DOUBLE_QUOTE.value, BnfSpecialChar.SINGLE_QUOTE.value)
+		running_literal = ""
+		for char in line:
+			if self._is_quote_char(char, quote_type):
+				if in_literal:
+					tokens.append(BnfToken(BnfTokenType.LITERAL, running_literal))
+					in_literal = False
+					quote_type = (BnfSpecialChar.DOUBLE_QUOTE.value, BnfSpecialChar.SINGLE_QUOTE.value)
+					running_literal = ""
+				else:
+					in_literal = True
+					quote_type = tuple(char)
+					running_literal = ""
+			# TODO - parse out a rule
+			# TODO - parse out a pipe
+			# TODO - parse out internal characters
+
+
+
 		pass
+
+	@staticmethod
+	def _is_quote_char(char: str, 
+					   desired_quote_chars: typing.Iterable[str]
+					  ) -> bool:
+		return char in desired_quote_chars
 
 	def _lex_rule_name(self, line: str, linenum: int):
 		try:
@@ -87,4 +120,6 @@ class _BootstrapBnfParserGenerator:
 		return rule_name
 
 	def _error(self, linenum: int, reason: str, value: str):
-		raise BnfSyntaxViolation(f"Specification [{self.name}] has invalid syntax on line {linenum} <{reason}>: {value}")
+		raise BnfSyntaxViolation(
+			f"Specification [{self.name}] has invalid syntax on line {linenum} <{reason}>: {value}"
+		)
