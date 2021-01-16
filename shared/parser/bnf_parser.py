@@ -5,11 +5,15 @@ import typing
 
 
 class BnfSyntaxViolation(Exception):
+	"""Represents invalid syntax within a BNF grammar."""
+	
 	pass
 
 
 @enum.unique
 class BnfTokenType(enum.Enum):
+	"""A type of token within a BNF grammar"""
+	
 	NAME = enum.auto()
 	LITERAL = enum.auto()
 	SEPARATOR = enum.auto()
@@ -18,7 +22,9 @@ class BnfTokenType(enum.Enum):
 
 
 @enum.unique
-class BnfBulitinTokens(enum.Enum):
+class BnfBuiltinTokens(enum.Enum):
+	"""Builtin tokens that have an established meaning in the EBNF grammar"""
+
 	DIGIT = "digit"
 	LETTER = "letter"
 	UPPER_LETTER = "uppercase-letter"
@@ -28,9 +34,19 @@ class BnfBulitinTokens(enum.Enum):
 	WHITESPACE = "whitespace"
 	SYMBOL = "symbol"
 
+	@property
+	def as_rule_name(self) -> str:
+		"""
+		The builtin token as a valid BNF rule name.
+		"""
+
+		return f"<{self.value}>"
+	
 
 @enum.unique
 class BnfSpecialChar(enum.Enum):
+	"""Special character(s) in the EBNF grammar."""
+
 	OPEN_BRACKET = '<'
 	CLOSE_BRACKET = '>'
 	SINGLE_QUOTE = "'"
@@ -39,14 +55,33 @@ class BnfSpecialChar(enum.Enum):
 	HYPHEN = '-'
 	COMMENT = ';'
 	ASSIGNMENT = "::="
+	EOL = "\r\n"
 
 
 class BnfToken(collections.namedtuple("BnfToken", "token_type token_value")):
+	"""A particular token in an EBNF grammar"""
+
 	pass
 
 
 class _BootstrapBnfParserGenerator:
+	"""Bootstrapped parser-generator for the EBNF grammar.
+
+	Used to generate the BNF Parser Generator that can be used downstream.
+	"""
+
 	def __init__(self, name: str, specification: typing.Union[str, typing.Iterable[str]]):
+		"""
+		Create the bootstrapper parser
+
+		Parameters
+		==========
+		name: str
+			The name of this grammar
+		specification: str or Iterable[str]
+			Collection of rules of this grammar
+		"""
+
 		self.name = name
 		if hasattr(specification, "splitlines"):
 			specification = typing.cast(str, specification).splitlines()
@@ -62,6 +97,8 @@ class _BootstrapBnfParserGenerator:
 				self._lex_rule_assignment(line, i, tokens)
 			elif line:
 				self._error(line, "no rule", line)
+
+			tokens.append(BnfToken(BnfTokenType.LITERAL, BnfSpecialChar.EOL))
 		return tokens
 
 	def _lex_comment(self, line: str, tokens: typing.List[str]):
@@ -75,13 +112,18 @@ class _BootstrapBnfParserGenerator:
 			self._error(linenum, "no rule assignment", rem_line)
 		rem_line = rem_line[len(BnfSpecialChar.ASSIGNMENT.value):].strip()  # get the actual assignment
 
+		tokens.append(BnfToken(BnfTokenType.NAME, rule_name))
 		self._lex_assignment_options(rem_line, linenum, tokens)
 
 	def _lex_assignment_options(self, line: str, linenum: int, tokens: typing.List[str]):
+		ws_pattern = re.compile(r"\s+", re.VERBOSE)
 		in_literal = False
 		quote_type = (BnfSpecialChar.DOUBLE_QUOTE.value, BnfSpecialChar.SINGLE_QUOTE.value)
 		running_literal = ""
-		for char in line:
+		i = 0
+		length = len(line)
+		while i < length:
+			char = line[i]
 			if self._is_quote_char(char, quote_type):
 				if in_literal:
 					tokens.append(BnfToken(BnfTokenType.LITERAL, running_literal))
@@ -92,13 +134,28 @@ class _BootstrapBnfParserGenerator:
 					in_literal = True
 					quote_type = tuple(char)
 					running_literal = ""
-			# TODO - parse out a rule
-			# TODO - parse out a pipe
-			# TODO - parse out internal characters
+			elif in_literal:
+				running_literal += char
+			else:
+				for enum_member in BnfBuiltinTokens:
+					rule_name = enum_member.as_rule_name
+					if line[i:i+len(rule_name)] == rule_name:
+						tokens.append(BnfToken(BnfTokenType.BUILTIN, enum_member))
+						break
+				else:
+					if char == BnfSpecialChar.OPEN_BRACKET.value:
+						rule_name = self._lex_rule_name(line[i:], linenum)
+						tokens.append(BnfToken(BnfTokenType.NAME, rule_name))
+						i += len(rule_name) + 2  # rule name plus the characters
+					elif char == BnfSpecialChar.SEPARATOR.value:
+						tokens.append(BnfToken(BnfTokenType.SEPARATOR, char))
+					elif ws_pattern.match(char):
+						# skip whitespace only
+						pass
+					else:
+							self._error(linenum, "unknown character", char)
 
-
-
-		pass
+			i += 1
 
 	@staticmethod
 	def _is_quote_char(char: str, 
