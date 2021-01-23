@@ -3,7 +3,7 @@ import re
 from collections import namedtuple
 from enum import Enum, unique, auto
 from pathlib import Path
-from typing import List, TextIO
+from typing import List, TextIO, Union, cast, Dict
 
 
 class BnfSyntaxViolationError(Exception):
@@ -18,7 +18,7 @@ class BnfSyntaxViolationError(Exception):
 
 	def __str__(self):
 		return f"""Specification [{self.grammar_name}] has invalid syntax on line {
-				   	   self.line_number} <{self.reason}>: {self.invalid_value}"""
+				   	   self.line_number} [{self.reason}]: {self.invalid_value}"""
 
 	def __repr__(self):
 		return str(self)
@@ -57,7 +57,7 @@ class BnfBuiltinTokens(Enum):
 		return f"<{self.value}>"
 	
 	@classmethod
-	def lookup(cls, value: str) -> BnfBuiltinTokens:
+	def lookup(cls, value: str) -> Enum:
 		"""
 		Given a value, find the Enum member
 
@@ -123,7 +123,7 @@ def read_grammar_from_file(file: Path) -> List[str]:
 		return read_grammar(f)
 
 
-def read_grammar(grammar_stream: TextIO) -> List[str]:
+def read_grammar(grammar_stream: Union[TextIO, str]) -> List[str]:
 	"""
 	Read the grammar and split line-by-line.
 
@@ -137,6 +137,9 @@ def read_grammar(grammar_stream: TextIO) -> List[str]:
 	List[str]
 		The lines of the grammar
 	"""
+
+	if hasattr(grammar_stream, "splitlines"):
+		grammar_stream = cast(str, grammar_stream).splitlines()
 
 	return [line.strip() for line in grammar_stream]
 
@@ -156,13 +159,15 @@ def _lex_grammar(grammar: List[str]) -> List[BnfToken]:
 		The tokens in the grammar
 	"""
 
+	EOL_TOKEN = BnfToken(BnfTokenType.LITERAL, BnfSpecialChar.EOL)
+
 	tokens = []
 	for i, line in enumerate(grammar):
 		line = line.strip()
 
 		if line.startswith(BnfSpecialChar.COMMENT.value):
 			# comments aren't tokens, just strip them
-			continue  
+			pass
 		elif line.startswith(BnfSpecialChar.OPEN_BRACKET.value):
 			# We have a rule definition
 			tokens.extend(_lex_line(i, line))
@@ -170,8 +175,13 @@ def _lex_grammar(grammar: List[str]) -> List[BnfToken]:
 			# Something unknown happend
 			raise BnfSyntaxViolationError(i, "Extended BNF", "Unknown Value", line)
 		else:
-			# the line was whitespace only
-			tokens.append(BnfToken(BnfTokenType.LITERAL, BnfSpecialChar.EOL))
+			# whitespace only
+			pass
+
+		# mark the end of the line, but condense repeated EOL
+		if tokens and tokens[-1] != EOL_TOKEN:
+			tokens.append(EOL_TOKEN)
+
 	return tokens
 
 
@@ -193,9 +203,11 @@ def _lex_line(line_number: int, line: str) -> List[BnfToken]:
 	tokens.append(BnfToken(BnfTokenType.NAME, rule_name))	
 
 	# grab the rule evaluation
-	mod_line = mod_line.strip()
+	mod_line = mod_line[len(rule_name)+1:].strip()
 	if not mod_line.startswith(BnfSpecialChar.ASSIGNMENT.value):
 		raise BnfSyntaxViolationError(line_number, "Extended BNF", f"Rule <{rule_name}> expression is missing an assignment", line)
+
+	tokens.append(BnfToken(BnfTokenType.LITERAL, BnfSpecialChar.ASSIGNMENT))
 
 	mod_line = mod_line[len(BnfSpecialChar.ASSIGNMENT.value):].strip()
 
@@ -205,7 +217,7 @@ def _lex_line(line_number: int, line: str) -> List[BnfToken]:
 	quote_pairs = {
 		# Key = open quote, value = close quote
 		BnfSpecialChar.OPEN_BRACKET.value: BnfSpecialChar.CLOSE_BRACKET.value,
-		BnfSpecialChar.SINGLE_QUOTE.value: BnfSpecialChar.SINGLE_QUOTE.value
+		BnfSpecialChar.SINGLE_QUOTE.value: BnfSpecialChar.SINGLE_QUOTE.value,
 		BnfSpecialChar.DOUBLE_QUOTE.value: BnfSpecialChar.DOUBLE_QUOTE.value
 	}
 	ws_pattern = re.compile(r"\s")
@@ -251,10 +263,23 @@ def _lex_line(line_number: int, line: str) -> List[BnfToken]:
 					line_number, "Extended BNF", 
 					f"Rule <{rule_name}> expression had unexpected character", char
 				)
+	
+	if in_quotes:
+		if quote_type == BnfSpecialChar.CLOSE_BRACKET.value:
+			raise BnfSyntaxViolationError(
+				line_number, "Extended BNF",
+				f"Rule <{rule_name}> expression had invalid sub-rule", running_value
+			)
+		else:
+			raise BnfSyntaxViolationError(
+				line_number, "Extended BNF",
+				f"Rule <{rule_name}> expression had unterminated literal value", running_value
+			)
+
 	tokens.append(BnfToken(BnfTokenType.LITERAL, BnfSpecialChar.EOL))
 
 	# now handle builtins
-	for i, (token_type, token_value) in enumerate(tokens):
+	for i, (token_type, token_value) in enumerate(tokens[1:], 1):
 		if token_type is BnfTokenType.NAME:
 			try:
 				member = BnfBuiltinTokens.lookup(token_value)
@@ -282,9 +307,76 @@ def _validate_rule_name(rule_name: str) -> bool:
 	"""
 
 	pattern = re.compile(r"""
-		[a-zA-Z]  # must have a leading letter
-		\w*		  # then 0 or more valid identifier characters
+		^               # The whole string
+		[a-zA-Z]        # must have a leading letter
+		[a-zA-Z0-9-_]*  # then 0 or more valid identifier characters
+		$               # all the way to the end
 	""", re.VERBOSE)
 
 	return pattern.match(rule_name) is not None
 
+def _parse_bnf_grammar(tokens: List[BnfToken]):
+	rules = {}
+
+	line_number = 0
+	i = 0
+	expression = ""
+	while i < len(tokens):
+		rule_type, rule_name = tokens[i]
+		if rule_type is not BnfTokenType.NAME:
+			raise BnfSyntaxViolationError(line_number, "Extended BNF", "Unexpected token", tokens[i])
+
+		rule_config = rules.setdefault(rule_name, {})
+		rule_config["R"] = []
+		rule_config["X"] = None
+		all_rules = rule_config["R"]
+
+		i += 1
+		assign_type, assign_expr = tokens[i]
+		if assign_type is not BnfTokenType.LITERAL or assign_expr is not BnfSpecialChar.ASSIGNMENT:
+			raise BnfSyntaxViolationError(line_number, "Extended BNF", "Unexpected token", tokens[i])
+
+		i += 1
+		token_type, token = tokens[i]
+		cur_expr = []
+		while token is not BnfSpecialChar.EOL:
+			if token_type is BnfTokenType.SEPARATOR:
+				all_rules.append(cur_expr)
+				cur_expr = []
+			else:
+				cur_expr.append(tokens[i])
+			i += 1
+			if i >= len(tokens):
+				break
+			token_type, token = tokens[i]
+
+		if cur_expr:
+			all_rules.append(cur_expr)
+
+		i += 1
+		line_number += 1
+
+	return rules
+
+def _translate_parse_tree_to_regex(rule_name: str, tree: Dict[str, List[List[BnfToken]]]):
+	if rule_name not in tree:
+		raise BnfSyntaxViolationError(-1, "Extended BNF", "Unknown rule name", rule_name)
+
+	if tree[rule_name]["X"] is not None:
+		return tree[rule_name]["X"]
+
+	config = tree[rule_name]["R"]
+	options = []
+	for optional in config:
+		expr = ""
+		for token_type, token_value in optional:
+			if token_type is BnfTokenType.NAME:
+				if token_value == rule_name:
+					raise BnfSyntaxViolationError(-1, "Extended BNF", "Recursive rule definition", rule_name)
+				expr += _translate_parse_tree_to_regex(token_value, tree)
+			else:
+				expr += re.escape(token_value)
+		options.append(expr)
+
+	return "|".join(f"({expr})" for expr in options)
+	

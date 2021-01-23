@@ -15,7 +15,6 @@
 <character>         ::= <letter> | <digit> | <symbol>
 <character1>        ::= <character> | "'"
 <character2>        ::= <character> | '"'
-<character>         ::= <letter> | <digit> | <symbol>
 <rule-name>         ::= <letter> | <rule-name> <rule-char>
 <rule-char>         ::= <letter> | <digit> | "-" | "_"
 ; Split into two sections for clarity
@@ -25,4 +24,4 @@
 <digit>             ::= "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9"
 <symbol>            ::=  "|" | " " | "!" | "#" | "$" | "%" | "&" | "(" | ")" | "*" | "+" | "," | "-" | "." | "/" | ":" | ";" | ">" | "=" | "<" | "?" | "@" | "[" | "\" | "]" | "^" | "_" | "`" | "{" | "}" | "~"
 ; Providing built-ins that can be assumed
-<built-in-rule>     ::= "<digit>" | "<letter>" | "<lowercase-letter>" | "<uppercase-letter>"" | "<EOL>" | "<word>" | "<whitespace>"
+<built-in-rule>     ::= "<digit>" | "<letter>" | "<lowercase-letter>" | "<uppercase-letter>" | "<EOL>" | "<word>" | "<whitespace>" | "<symbol>"
